@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include "lp_lib.h"
 
 namespace py = pybind11;
 
@@ -71,6 +72,7 @@ public:
     std::vector<int> find_br();
 
 private:
+    bool flow_linear();
     std::vector<double> potential;
     std::vector<std::vector<int>> d_vertices;
     std::vector<std::vector<double>> d_flow;
@@ -134,6 +136,215 @@ void Graph::delete_flow()
     {
         d.clear();
     }
+}
+
+bool Graph::flow_linear()
+{
+    int edge_cols = 0;
+    for (auto &v : d_vertices)
+    {
+        edge_cols += v.size();
+    }
+    int n_cols = edge_cols * edges.size() / 2;
+    lprec *lp = make_lp(0, n_cols);
+    if (lp == NULL)
+    {
+        return false;
+    }
+    std::vector<std::vector<std::string>> labels(d_vertices.size());
+    int cnt = 0;
+    for (int k = 0; k < edges.size() / 2; k++)
+    {
+        for (int i = 0; i < d_vertices.size(); i++)
+        {
+            for (auto j : d_vertices[i])
+            {
+                cnt++;
+                labels[i].push_back("(" + std::to_string(i) + "->" + std::to_string(j) + "_" + std::to_string(k) + ")");
+                set_col_name(lp, cnt, labels[i].back().data());
+            }
+        }
+    }
+    auto col_no = (int *)calloc(edge_cols, sizeof(int));
+    auto row = (REAL *)calloc(edge_cols, sizeof(REAL));
+    for (int i = 0; i < edge_cols; i++)
+    {
+        row[i] = 1;
+    }
+    if ((col_no == NULL) || (row == NULL))
+    {
+        if (col_no != NULL)
+        {
+            free(col_no);
+        }
+        if (row != NULL)
+        {
+            free(row);
+        }
+        delete_lp(lp);
+        return false;
+    }
+    cnt = 0;
+    set_add_rowmode(lp, TRUE);
+    REAL one = 1;
+    for (int k = 0; k < edges.size() / 2; k++)
+    {
+        for (int i = 0; i < d_vertices.size(); i++)
+        {
+            for (auto j : d_vertices[i])
+            {
+                cnt++;
+                if (edges[2 * k].blocked)
+                {
+                    if (!add_constraintex(lp, 1, &one, &cnt, EQ, 0))
+                    {
+                        free(col_no);
+                        free(row);
+                        delete_lp(lp);
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    for (int k = 0; k < edges.size() / 2; k++)
+    {
+        for (int i = 0; i < edge_cols; i++)
+        {
+            col_no[i] = k * edge_cols + i + 1;
+        }
+        if (!add_constraintex(lp, edge_cols, row, col_no, LE, edges[k * 2].max_flow))
+        {
+            free(col_no);
+            free(row);
+            delete_lp(lp);
+            return false;
+        }
+    }
+    free(col_no);
+    free(row);
+    col_no = (int *)calloc(edges.size() / 2, sizeof(int));
+    row = (REAL *)calloc(edges.size() / 2, sizeof(REAL));
+    if ((col_no == NULL) || (row == NULL))
+    {
+        if (col_no != NULL)
+        {
+            free(col_no);
+        }
+        if (row != NULL)
+        {
+            free(row);
+        }
+        delete_lp(lp);
+        return false;
+    }
+    cnt = 0;
+    for (int i = 0; i < d_vertices.size(); i++)
+    {
+        for (int j = 0; j < d_vertices[i].size(); j++)
+        {
+            for (int k = 0; k < vert.size(); k++)
+            {
+                for (int t = 0; t < edges.size() / 2; t++)
+                {
+                    col_no[t] = 0;
+                    row[t] = 0;
+                }
+                for (int t = 0; t < vert[k].size(); t++)
+                {
+                    col_no[t] = (vert[k][t] / 2) * edge_cols + cnt + 1;
+                    if (vert[k][t] % 2 == 0)
+                    {
+                        row[t] = 1.;
+                    }
+                    else
+                    {
+                        row[t] = -1.;
+                    }
+                }
+                double sum = 0;
+                if (i != d_vertices[i][j])
+                {
+                    if (i == k)
+                    {
+                        sum = d_flow[i][j];
+                    }
+                    if (d_vertices[i][j] == k)
+                    {
+                        sum = -d_flow[i][j];
+                    }
+                }
+                if (!add_constraintex(lp, vert[k].size(), row, col_no, EQ, sum))
+                {
+                    free(col_no);
+                    free(row);
+                    delete_lp(lp);
+                    return false;
+                }
+            }
+            cnt++;
+        }
+    }
+    set_add_rowmode(lp, FALSE);
+    free(col_no);
+    free(row);
+    col_no = (int *)calloc(n_cols, sizeof(int));
+    row = (REAL *)calloc(n_cols, sizeof(REAL));
+    cnt = 0;
+    for (int k = 0; k < edges.size() / 2; k++)
+    {
+        for (int i = 0; i < d_vertices.size(); i++)
+        {
+            for (auto j : d_vertices[i])
+            {
+                row[cnt] = edges[k * 2].cost;
+                col_no[cnt] = cnt + 1;
+                cnt++;
+            }
+        }
+    }
+    if (!set_obj_fnex(lp, n_cols, row, col_no))
+    {
+        free(col_no);
+        free(row);
+        delete_lp(lp);
+        return false;
+    }
+    set_minim(lp);
+    set_verbose(lp, IMPORTANT);
+
+    // now let lpsolve calculate a solution
+    if (solve(lp) != OPTIMAL)
+    {
+        free(col_no);
+        free(row);
+        delete_lp(lp);
+        return false;
+    }
+
+    // variable values
+    get_variables(lp, row);
+    cnt = 0;
+    for (int k = 0; k < edges.size() / 2; k++)
+    {
+        edges[k].flow = 0;
+    }
+    for (int k = 0; k < edges.size() / 2; k++)
+    {
+        for (int i = 0; i < d_vertices.size(); i++)
+        {
+            for (auto j : d_vertices[i])
+            {
+                edges[k * 2].flow += row[cnt];
+                edges[k * 2 + 1].flow -= row[cnt];
+                cnt++;
+            }
+        }
+    }
+    free(col_no);
+    free(row);
+    delete_lp(lp);
+    return true;
 }
 
 bool Graph::run_flow(int u, int v, double f)
@@ -287,13 +498,15 @@ void Graph::dfs_residual(int u, std::vector<bool> &used, std::vector<float> &p, 
 py::tuple Graph::calculate_flow()
 {
     bool clear = true;
-    for (int i = 0; i < d_vertices.size(); i++)
+    if (!flow_linear())
     {
-        for (int j = 0; j < d_vertices[i].size(); i++)
-        {
-            clear = clear && run_flow(i, d_vertices[i][j], d_flow[i][j]);
-        }
+        return py::make_tuple(false, std::vector<py::tuple>(0), std::vector<py::tuple>(0));
     }
+    for (auto &e : edges)
+    {
+        std::cout << e.flow << " ";
+    }
+    std::cout << std::endl;
     std::vector<std::set<int>> connected_sets;
     std::vector<std::vector<double>> time(d_vertices.size(), std::vector<double>());
     for (int i = 0; i < d_vertices.size(); i++)

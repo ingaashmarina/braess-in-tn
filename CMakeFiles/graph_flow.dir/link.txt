@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -flto -shared  -o graph_flow.cpython-311-x86_64-linux-gnu.so CMakeFiles/graph_flow.dir/graph_flow.cpp.o  -L"/home/olegshitikov/Desktop/transport/extern/lpsolve" -Wl,-rpath="/home/olegshitikov/Desktop/transport/extern/lpsolve" -llpsolve55 
