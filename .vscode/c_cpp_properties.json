@@ -3,9 +3,9 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**",
+                "${workspaceFolder}/graph_flow/**",
                 "/usr/include/python3.11",
-                "${workspaceFolder}/extern/pybind11/include"
+                "${workspaceFolder}/graph_flow/extern/pybind11/include"
             ],
             "defines": [],
             "cStandard": "c17",

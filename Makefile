@@ -126,32 +126,8 @@ graph_flow: cmake_check_build_system
 
 # fast build rule for target.
 graph_flow/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/graph_flow.dir/build.make CMakeFiles/graph_flow.dir/build
+	$(MAKE) $(MAKESILENT) -f graph_flow/CMakeFiles/graph_flow.dir/build.make graph_flow/CMakeFiles/graph_flow.dir/build
 .PHONY : graph_flow/fast
-
-graph_flow.o: graph_flow.cpp.o
-.PHONY : graph_flow.o
-
-# target to build an object file
-graph_flow.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/graph_flow.dir/build.make CMakeFiles/graph_flow.dir/graph_flow.cpp.o
-.PHONY : graph_flow.cpp.o
-
-graph_flow.i: graph_flow.cpp.i
-.PHONY : graph_flow.i
-
-# target to preprocess a source file
-graph_flow.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/graph_flow.dir/build.make CMakeFiles/graph_flow.dir/graph_flow.cpp.i
-.PHONY : graph_flow.cpp.i
-
-graph_flow.s: graph_flow.cpp.s
-.PHONY : graph_flow.s
-
-# target to generate assembly for a file
-graph_flow.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/graph_flow.dir/build.make CMakeFiles/graph_flow.dir/graph_flow.cpp.s
-.PHONY : graph_flow.cpp.s
 
 # Help Target
 help:
@@ -162,9 +138,6 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... graph_flow"
-	@echo "... graph_flow.o"
-	@echo "... graph_flow.i"
-	@echo "... graph_flow.s"
 .PHONY : help
 
 
