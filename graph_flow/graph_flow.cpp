@@ -17,10 +17,11 @@ public:
     int u, v;
     double flow = 0, max_flow;
     double cost;
+    double time = -1;
     bool free = false;
-    bool blocked = false;
-    double weight = 0;
+    double weight;
     std::vector<int> corr_components;
+    int def_corr = -1;
 
     Edge(int u, int v, double max_flow, double cost);
     double get_residual_capacity() const;
@@ -65,9 +66,7 @@ public:
         }
     }
     int add_edge(int u, int v, double max_flow, double cost);
-    void block_edge(int id);
-    void add_cost(int id, double flow);
-    void reuse_edge(int id);
+    void add_cost(int edge_id, double cost);
     void set_flow(const std::vector<std::tuple<int, int, double>> &flow);
     py::tuple calculate_flow();
     py::tuple calculate_time();
@@ -90,76 +89,23 @@ private:
         std::vector<int> parents;
         std::vector<int> rank;
         std::vector<std::vector<int>> edge_list;
-        const std::vector<Edge> &edges;
-        DSUEdges(int n, int c, const std::vector<Edge> &e) : parents(n), rank(n),
-                                                             corr(c), edge_list(n),
-                                                             edges(e)
-        {
-            for (int i = 0; i < n; i++)
-            {
-                parents[i] = i;
-            }
-        }
-        int get(int u)
-        {
-            if (parents[u] != u)
-                parents[u] = get(parents[u]);
-            return parents[u];
-        }
-        bool merge(int u, int v, std::vector<bool> &used_edges,
-                   std::deque<std::pair<int, int>> &edge_queue)
-        {
-            u = get(u);
-            v = get(v);
-            if (u == v)
-                return false;
+        std::vector<std::vector<int>> node_list;
+        std::vector<Edge> &edges;
+        std::vector<double> potential;
 
-            std::vector<int> h_edges = std::move(edge_list[u]);
-            std::vector<int> d_edges = std::move(edge_list[v]);
-            if (h_edges.size() < d_edges.size())
-            {
-                std::swap(h_edges, d_edges);
-            }
-            for (auto e : d_edges)
-            {
-
-                int u_h = get(edges[e].u), v_h = get(edges[e].v);
-                if ((u == u_h && v == v_h) || (u == v_h && v == u_h))
-                {
-                    if (!used_edges[e])
-                    {
-                        used_edges[e] = true;
-                        edge_queue.push_back({corr, e});
-                    }
-                }
-                else
-                    h_edges.push_back(e);
-            }
-            d_edges.clear();
-
-            if (rank[u] == rank[v])
-                rank[u] += 1;
-            if (rank[u] > rank[v])
-            {
-                parents[v] = u;
-                edge_list[u] = std::move(h_edges);
-            }
-            else
-            {
-                parents[u] = v;
-                edge_list[v] = std::move(h_edges);
-            }
-            return true;
-        }
+        DSUEdges(int n, int c, std::vector<Edge> &e);
+        int get(int u);
+        bool merge(Edge &e, std::vector<int> &edge_queue);
     };
 
     class SumTree
     {
     public:
-        SumTree(const std::vector<std::vector<int>> &neighb);
+        SumTree(const std::vector<std::vector<int>> &neighb,
+                std::vector<Edge> &edges);
         int lca(int u, int v);
         void add_flow(int u, int v, double w);
-        double get(int u);
+        double get_edge(int k);
 
     private:
         double get_all(int u);
@@ -167,9 +113,14 @@ private:
         int lca_tree(int u, int v, int k, int l, int r);
         void add_value(int u, double w);
         int z;
-        std::vector<int> parents, h, tree, first, last;
+
+        std::vector<Edge> &edges;
+        std::vector<int> directions;
+
+        std::vector<int> h, tree, first, last;
+        std::vector<int> parent_edges;
         std::vector<std::vector<int>> p;
-        std::vector<double> f, cost;
+        std::vector<double> f;
     };
 
     float eps;
@@ -177,50 +128,16 @@ private:
     std::vector<std::vector<int>> d_corrs;
     std::vector<int> corrs_start;
     std::vector<DSUEdges> dsu;
+    std::vector<SumTree> corr_trees;
 
-    std::vector<std::vector<std::vector<std::pair<int, int>>>> corr_edges;
     int corr_components;
 
     void set_dsu();
-    void set_dsu_free_edges(std::vector<bool> &used_edges, std::deque<std::pair<int, int>> &edges_queue);
-    void process_queue(std::vector<bool> &used_edges, std::deque<std::pair<int, int>> &edges_queue);
+    void set_dsu_free_edges(std::vector<int> &edges_queue,
+                            std::vector<std::vector<std::vector<int>>> &corr_edges);
+    void process_queue(std::vector<int> &edges_queue, int &queue_pos,
+                       std::vector<std::vector<std::vector<int>>> &corr_edges);
     bool flow_linear();
-    bool find_cost_corr(int u, int v, int corr, std::vector<bool> &vis_vert,
-                        std::vector<std::pair<int, std::pair<int, int>>> &edges_stack)
-    {
-        vis_vert[u] = true;
-        if (u == v)
-        {
-            return true;
-        }
-        else
-        {
-            for (auto &[e_corr, e] : corr_edges[corr][u])
-            {
-                int w, k;
-                if (edges[e].u == u)
-                {
-                    w = edges[e].v;
-                    k = 1;
-                }
-                else
-                {
-                    w = edges[e].u;
-                    k = -1;
-                }
-                if (!vis_vert[w])
-                {
-                    edges_stack.push_back({k, {e_corr, e}});
-                    if (find_cost_corr(w, v, corr, vis_vert, edges_stack))
-                    {
-                        return true;
-                    }
-                    edges_stack.pop_back();
-                }
-            }
-        }
-        return false;
-    }
 };
 
 int Graph::add_edge(int u, int v, double max_flow, double cost)
@@ -238,16 +155,6 @@ void Graph::add_cost(int id, double flow)
     edges[id].cost += flow;
 }
 
-void Graph::block_edge(int id)
-{
-    edges[id].blocked = true;
-}
-
-void Graph::reuse_edge(int id)
-{
-    edges[id].blocked = false;
-}
-
 void Graph::reset_flow()
 {
     for (auto &e : edges)
@@ -256,7 +163,11 @@ void Graph::reset_flow()
         e.free = false;
         e.weight = 0;
         e.corr_components.clear();
+        e.time = -1;
+        e.def_corr = -1;
     }
+    corr_trees.clear();
+    dsu.clear();
 }
 
 void Graph::set_flow(const std::vector<std::tuple<int, int, double>> &flow)
@@ -336,10 +247,10 @@ bool Graph::flow_linear()
         for (int i = 0; i < edge_cols; i++)
         {
             cnt++;
-            if (edges[k].blocked)
-            {
-                set_bounds(lp, cnt, 0, 0);
-            }
+            // if (edges[k].blocked)
+            //{
+            //     set_bounds(lp, cnt, 0, 0);
+            // }
         }
     }
     set_add_rowmode(lp, TRUE);
@@ -498,6 +409,104 @@ bool Graph::flow_linear()
     return true;
 }
 
+Graph::DSUEdges::DSUEdges(int n, int c, std::vector<Edge> &e) : parents(n), rank(n),
+                                                                corr(c), edge_list(n),
+                                                                edges(e), potential(n),
+                                                                node_list(n)
+{
+    for (int i = 0; i < n; i++)
+    {
+        parents[i] = i;
+        node_list[i].push_back(i);
+    }
+}
+
+int Graph::DSUEdges::get(int u)
+{
+    if (parents[u] != u)
+        parents[u] = get(parents[u]);
+    return parents[u];
+}
+
+bool Graph::DSUEdges::merge(Edge &e, std::vector<int> &edge_queue)
+{
+    int u = get(e.u);
+    int v = get(e.v);
+    if (u == v)
+        return false;
+
+    std::vector<int> d_vertices;
+    std::vector<int> h_vertices;
+
+    if (node_list[v].size() > node_list[u].size())
+    {
+        double p_u = potential[e.v] - e.time - potential[e.u];
+        for (auto k : node_list[u])
+        {
+            potential[k] += p_u;
+        }
+        h_vertices = std::move(node_list[u]);
+        d_vertices = std::move(node_list[v]);
+    }
+    else
+    {
+        double p_v = potential[e.u] + e.time - potential[e.v];
+        for (auto k : node_list[v])
+        {
+            potential[k] += p_v;
+        }
+        h_vertices = std::move(node_list[v]);
+        d_vertices = std::move(node_list[u]);
+    }
+    for (auto x : h_vertices)
+    {
+        d_vertices.push_back(x);
+    }
+    h_vertices.clear();
+
+    // ====================================================
+    std::vector<int> h_edges = std::move(edge_list[u]);
+    std::vector<int> d_edges = std::move(edge_list[v]);
+    if (h_edges.size() < d_edges.size())
+    {
+        std::swap(h_edges, d_edges);
+    }
+    for (auto e : d_edges)
+    {
+
+        int u_h = get(edges[e].u), v_h = get(edges[e].v);
+        if ((u == u_h && v == v_h) || (u == v_h && v == u_h))
+        {
+            edges[e].time = potential[edges[e].v] - potential[edges[e].u];
+            if (edges[e].def_corr == -1)
+            {
+                edges[e].def_corr = corr;
+                edge_queue.push_back(e);
+            }
+        }
+        else
+            h_edges.push_back(e);
+    }
+    d_edges.clear();
+
+    if (rank[u] == rank[v])
+        rank[u] += 1;
+    if (rank[u] > rank[v])
+    {
+        parents[v] = u;
+        edge_list[u] = std::move(h_edges);
+        node_list[u] = std::move(d_vertices);
+    }
+    else
+    {
+        parents[u] = v;
+        edge_list[v] = std::move(h_edges);
+        node_list[v] = std::move(d_vertices);
+    }
+
+    return true;
+}
+
 void Graph::set_dsu()
 {
     for (int i = 0; i < corr_components; i++)
@@ -517,46 +526,46 @@ void Graph::set_dsu()
     }
 }
 
-void Graph::set_dsu_free_edges(std::vector<bool> &used_edges, std::deque<std::pair<int, int>> &edges_queue)
+void Graph::set_dsu_free_edges(std::vector<int> &edges_queue,
+                               std::vector<std::vector<std::vector<int>>> &corr_edges)
 {
-    corr_edges = std::vector<std::vector<std::vector<std::pair<int, int>>>>(corr_components,
-                                                                            std::vector<std::vector<std::pair<int, int>>>(n));
     for (int i = 0; i < edges.size(); i++)
     {
         if (edges[i].free)
         {
-            used_edges[i] = true;
+            edges[i].time = edges[i].cost;
             for (auto e : edges[i].corr_components)
             {
-                if (dsu[e].merge(edges[i].u, edges[i].v, used_edges, edges_queue))
+                if (dsu[e].merge(edges[i], edges_queue))
                 {
-                    corr_edges[e][edges[i].u].push_back({e, i});
-                    corr_edges[e][edges[i].v].push_back({e, i});
+                    corr_edges[e][edges[i].u].push_back(i);
+                    corr_edges[e][edges[i].v].push_back(i);
                 }
             }
         }
     }
 }
 
-void Graph::process_queue(std::vector<bool> &used_edges, std::deque<std::pair<int, int>> &edges_queue)
+void Graph::process_queue(std::vector<int> &edges_queue, int &queue_pos,
+                          std::vector<std::vector<std::vector<int>>> &corr_edges)
 {
-    while (!edges_queue.empty())
+    while (queue_pos < edges_queue.size())
     {
-        auto [p_corr, e] = edges_queue.front();
+        int e = edges_queue[queue_pos];
         auto &edge = edges[e];
         for (auto &corr : edge.corr_components)
         {
-            if (corr != p_corr && dsu[corr].merge(edge.u, edge.v, used_edges, edges_queue))
+            if (corr != edge.def_corr && dsu[corr].merge(edge, edges_queue))
             {
-                corr_edges[corr][edge.u].push_back({p_corr, e});
-                corr_edges[corr][edge.v].push_back({p_corr, e});
+                corr_edges[corr][edge.u].push_back(e);
+                corr_edges[corr][edge.v].push_back(e);
             }
         }
-        edges_queue.pop_front();
+        queue_pos++;
     }
-    for (int i = 0; i < used_edges.size(); i++)
+    for (int i = 0; i < edges.size(); i++)
     {
-        if (!used_edges[i])
+        if (!edges[i].free && edges[i].def_corr == -1)
         {
             std::cout << "not processed: " << i << " " << edges[i].u << "->" << edges[i].v << std::endl;
         }
@@ -586,94 +595,85 @@ py::tuple Graph::calculate_time()
 {
     set_dsu();
     std::vector<bool> used_edges(edges.size());
-    std::deque<std::pair<int, int>> edges_queue;
-    set_dsu_free_edges(used_edges, edges_queue);
-    process_queue(used_edges, edges_queue);
+    auto corr_edges = std::vector<std::vector<std::vector<int>>>(corr_components,
+                                                                 std::vector<std::vector<int>>(n));
 
-    std::vector<std::vector<int>> c_edges(corr_components);
-    for (int i = 0; i < corr_components; i++)
+    int pos = 0;
+    std::vector<int> edges_order;
+
+    set_dsu_free_edges(edges_order, corr_edges);
+    process_queue(edges_order, pos, corr_edges);
+
+    for (int j = 0; j < corr_components; j++)
     {
-        std::set<int> w;
-        for (auto &l : corr_edges[i])
+        int k = -1;
+        for (int i = 0; i < n; i++)
         {
-            for (auto &p : l)
+            int t = dsu[j].get(i);
+            if (t != i && t != k)
             {
-                for (auto &z : l)
-                {
-                    w.insert(z.second);
-                }
-            }
-        }
-        c_edges[i] = std::vector<int>(w.begin(), w.end());
-    }
-    //
-
-    std::vector<double> costs;
-    double sum;
-    std::cout << "paths" << std::endl;
-    for (auto &cor : d_flow)
-    {
-        std::vector<std::vector<bool>> used(corr_components, std::vector<bool>(n));
-        std::deque<std::tuple<int, int, int>> queue{{cor.u, cor.v, cor.component}};
-        double f = 0;
-        while (!queue.empty())
-        {
-            auto [u, v, c] = queue.front();
-            // std::cout << "edges " << u << " " << v << " " << c << std::endl;
-            std::vector<std::pair<int, std::pair<int, int>>> edges_stack;
-            if (!find_cost_corr(u, v, c, used[c], edges_stack))
-            {
-                std::cout << u + 1 << " " << v + 1 << std::endl;
-                std::cout << "cannot find route!" << std::endl;
-                break;
-            }
-
-            for (auto &p : edges_stack)
-            {
-                if (p.second.first == c)
-                {
-                    edges[p.second.second].weight += p.first * cor.flow;
-                    f += p.first * edges[p.second.second].cost;
-                    // std::cout << p.first << " | " << edges[p.second.second].u + 1 << "->" << edges[p.second.second].v + 1 << std::endl;
-                }
+                if (k == -1)
+                    k = t;
                 else
                 {
-                    if (p.first > 0)
-                    {
-                        queue.push_back({edges[p.second.second].u, edges[p.second.second].v, p.second.first});
-                    }
-                    else
-                    {
-                        queue.push_back({edges[p.second.second].v, edges[p.second.second].u, p.second.first});
-                    }
+                    return py::make_tuple(false, std::vector<int>(), std::vector<double>(), 0);
                 }
             }
-            queue.pop_front();
         }
-        costs.push_back(f);
-        sum += f * cor.flow;
     }
-    std::vector<int> braess;
+
+    for (auto &c_e : corr_edges)
+    {
+        corr_trees.push_back(SumTree(c_e, edges));
+    }
+
+    for (auto &cor : d_flow)
+    {
+        corr_trees[cor.component].add_flow(cor.u, cor.v, cor.flow);
+    }
+    for (int i = edges_order.size() - 1; i >= 0; i--)
+    {
+        int ord = edges_order[i];
+        for (auto &tree : corr_trees)
+        {
+            edges[ord].weight += tree.get_edge(ord);
+        }
+        corr_trees[edges[ord].def_corr].add_flow(edges[ord].u, edges[ord].v, edges[ord].weight);
+    }
     for (int i = 0; i < edges.size(); i++)
     {
-        if (edges[i].weight < 0)
-            braess.push_back(i);
+        if (edges[i].free)
+        {
+            for (auto &tree : corr_trees)
+            {
+                edges[i].weight += tree.get_edge(i);
+            }
+        }
     }
-    for (auto e : braess)
+    std::vector<py::tuple> braess;
+    for (int i = 0; i < edges.size(); i++)
     {
-        std::cout << e << ", ";
+        if (edges[i].weight < 0 && edges[i].free)
+            braess.push_back(py::make_tuple(i, edges[i].weight));
     }
-    std::cout << std::endl;
-    std::cout << sum << std::endl;
-    return py::make_tuple(braess, costs, sum);
+    std::vector<double> costs;
+    double sum;
+    for (auto &f : d_flow)
+    {
+        costs.push_back(dsu[f.component].potential[f.v] - dsu[f.component].potential[f.u]);
+        sum += f.flow * costs[costs.size() - 1];
+    }
+    return py::make_tuple(true, braess, costs, sum);
 }
 
-Graph::SumTree::SumTree(const std::vector<std::vector<int>> &neighb) : parents(neighb.size()),
-                                                                       h(neighb.size(), -1),
-                                                                       first(neighb.size(), -1),
-                                                                       last(neighb.size(), -1),
-                                                                       f(neighb.size() * 2 - 1),
-                                                                       cost(neighb.size())
+Graph::SumTree::SumTree(const std::vector<std::vector<int>> &neighb,
+                        std::vector<Edge> &edges) : parent_edges(neighb.size()),
+                                                    directions(edges.size()),
+                                                    h(neighb.size(), -1),
+                                                    first(neighb.size(), -1),
+                                                    last(neighb.size(), -1),
+                                                    f(neighb.size() * 2 - 1),
+                                                    edges(edges)
 {
     std::vector<int> sorted;
     sorted.reserve(neighb.size() * 2 - 1);
@@ -681,7 +681,6 @@ Graph::SumTree::SumTree(const std::vector<std::vector<int>> &neighb) : parents(n
     {
         if (neighb[i].size() > 0)
         {
-            int c = 0;
             dfs(i, neighb, sorted);
             break;
         }
@@ -713,11 +712,18 @@ void Graph::SumTree::dfs(int u, const std::vector<std::vector<int>> &neighb, std
 {
     first[u] = order.size();
     order.push_back(u);
-    for (auto &v : neighb[u])
+    for (auto &e : neighb[u])
     {
+        int k = 1, v = edges[e].u;
+        if (v == u)
+        {
+            k = -1;
+            v = edges[e].v;
+        }
         if (h[v] == -1)
         {
-            parents[v] = u;
+            parent_edges[v] = e;
+            directions[e] = k;
             h[v] = h[u] + 1;
             dfs(v, neighb, order);
             order.push_back(u);
@@ -787,9 +793,23 @@ double Graph::SumTree::get_all(int u)
     return ret;
 }
 
-double Graph::SumTree::get(int u)
+double Graph::SumTree::get_edge(int k)
 {
-    return get_all(last[u]) - get_all(first[u] - 1);
+    auto &e = edges[k];
+    int d = directions[k];
+    if (d != 0)
+    {
+        int u = e.u;
+        if (d == -1)
+        {
+            u = e.v;
+        }
+        return (get_all(last[u]) - get_all(first[u] - 1)) * d;
+    }
+    else
+    {
+        return 0;
+    }
 }
 
 PYBIND11_MODULE(graph_flow, m)
@@ -800,8 +820,8 @@ PYBIND11_MODULE(graph_flow, m)
              py::arg("edges") = std::vector<std::tuple<int, int, double, double>>())
         .def("add_edge", &Graph::add_edge)
         .def("add_cost", &Graph::add_cost)
-        .def("block_edge", &Graph::block_edge)
-        .def("reuse_edge", &Graph::reuse_edge)
+        //.def("block_edge", &Graph::block_edge)
+        //.def("reuse_edge", &Graph::reuse_edge)
         .def("reset_flow", &Graph::reset_flow)
         .def("set_flow", &Graph::set_flow)
         .def("calculate_flow", &Graph::calculate_flow)
