@@ -11,21 +11,20 @@ namespace py = pybind11;
 
 const double INF = std::numeric_limits<double>::max();
 
-class Edge
+struct Edge
 {
-public:
     int u, v;
     double flow = 0, max_flow;
     double cost;
+    double add_cost = 0;
     double time = -1;
     bool free = false;
-    double weight;
+    double weight = 0;
     std::vector<int> corr_components;
     int def_corr = -1;
 
     Edge(int u, int v, double max_flow, double cost);
-    double get_residual_capacity() const;
-
+    double get_cost() const;
     void add_flow(double f);
 };
 
@@ -36,9 +35,9 @@ Edge::Edge(int u, int v, double max_flow, double cost) : u(u),
 {
 }
 
-inline double Edge::get_residual_capacity() const
+inline double Edge::get_cost() const
 {
-    return max_flow - flow;
+    return cost + add_cost;
 }
 
 inline void Edge::add_flow(double f)
@@ -67,6 +66,9 @@ public:
     }
     int add_edge(int u, int v, double max_flow, double cost);
     void add_cost(int edge_id, double cost);
+    void reset_cost(int edge_id);
+    void reset_costs();
+    std::vector<int> get_path(int f_id);
     void set_flow(const std::vector<std::tuple<int, int, double>> &flow);
     py::tuple calculate_flow();
     py::tuple calculate_time();
@@ -106,6 +108,7 @@ private:
         int lca(int u, int v);
         void add_flow(int u, int v, double w);
         double get_edge(int k);
+        std::vector<int> parent_edges;
 
     private:
         double get_all(int u);
@@ -118,7 +121,6 @@ private:
         std::vector<int> directions;
 
         std::vector<int> h, tree, first, last;
-        std::vector<int> parent_edges;
         std::vector<std::vector<int>> p;
         std::vector<double> f;
     };
@@ -126,6 +128,7 @@ private:
     float eps;
     std::vector<Corr> d_flow;
     std::vector<std::vector<int>> d_corrs;
+    std::vector<std::vector<int>> corr_edges;
     std::vector<int> corrs_start;
     std::vector<DSUEdges> dsu;
     std::vector<SumTree> corr_trees;
@@ -138,6 +141,8 @@ private:
     void process_queue(std::vector<int> &edges_queue, int &queue_pos,
                        std::vector<std::vector<std::vector<int>>> &corr_edges);
     bool flow_linear();
+    std::vector<int> get_path_uv(int u, int v, int corr);
+    std::vector<int> get_path_up_uv(int u, int v, int corr);
 };
 
 int Graph::add_edge(int u, int v, double max_flow, double cost)
@@ -150,9 +155,22 @@ int Graph::add_edge(int u, int v, double max_flow, double cost)
     return edges.size() - 1;
 }
 
-void Graph::add_cost(int id, double flow)
+void Graph::add_cost(int id, double cost)
 {
-    edges[id].cost += flow;
+    edges[id].add_cost += cost;
+}
+
+void Graph::reset_cost(int id)
+{
+    edges[id].add_cost = 0;
+}
+
+void Graph::reset_costs()
+{
+    for (auto &e : edges)
+    {
+        e.add_cost = 0;
+    }
 }
 
 void Graph::reset_flow()
@@ -176,6 +194,7 @@ void Graph::set_flow(const std::vector<std::tuple<int, int, double>> &flow)
     d_flow.clear();
     d_corrs.clear();
     corrs_start.clear();
+    corr_edges.clear();
 
     std::vector<std::vector<int>> conn(n);
     for (auto &s : flow)
@@ -200,6 +219,7 @@ void Graph::set_flow(const std::vector<std::tuple<int, int, double>> &flow)
             corrs_start.push_back(i);
         }
     }
+    corr_edges = std::vector<std::vector<int>>(corr_components);
 }
 
 bool Graph::flow_linear()
@@ -345,7 +365,7 @@ bool Graph::flow_linear()
     {
         for (int i = 0; i < edge_cols; i++)
         {
-            row[cnt] = edges[k].cost;
+            row[cnt] = edges[k].get_cost();
             col_no[cnt] = cnt + 1;
             cnt++;
         }
@@ -368,11 +388,9 @@ bool Graph::flow_linear()
         free(col_no);
         free(row);
         delete_lp(lp);
-        std::cout << "failure" << std::endl;
         return false;
     }
     // print_solution(lp, 1);
-    std::cout << "success" << std::endl;
     // variable values
     get_variables(lp, row);
     cnt = 0;
@@ -394,14 +412,16 @@ bool Graph::flow_linear()
                 }
                 edges[k].flow += row[cnt];
                 edges[k].corr_components.push_back(i);
+                corr_edges[i].push_back(k);
             }
             cnt++;
         }
-        if (edges[k].flow + eps < edges[k].max_flow)
+        if (edges[k].flow + eps < edges[k].max_flow && edges[k].flow > eps)
         {
             edges[k].free = true;
         }
     }
+
     free(col_no);
     free(row);
     delete_lp(lp);
@@ -533,7 +553,7 @@ void Graph::set_dsu_free_edges(std::vector<int> &edges_queue,
     {
         if (edges[i].free)
         {
-            edges[i].time = edges[i].cost;
+            edges[i].time = edges[i].get_cost();
             for (auto e : edges[i].corr_components)
             {
                 if (dsu[e].merge(edges[i], edges_queue))
@@ -565,7 +585,7 @@ void Graph::process_queue(std::vector<int> &edges_queue, int &queue_pos,
     }
     for (int i = 0; i < edges.size(); i++)
     {
-        if (!edges[i].free && edges[i].def_corr == -1)
+        if (!edges[i].free && edges[i].flow > eps && edges[i].def_corr == -1)
         {
             std::cout << "not processed: " << i << " " << edges[i].u << "->" << edges[i].v << std::endl;
         }
@@ -574,20 +594,18 @@ void Graph::process_queue(std::vector<int> &edges_queue, int &queue_pos,
 
 py::tuple Graph::calculate_flow()
 {
-
-    std::cout << "calculating..." << std::endl;
     if (flow_linear())
     {
         std::vector<py::tuple> free_edges(edges.size());
         for (int i = 0; i < edges.size(); i++)
         {
-            free_edges[i] = py::make_tuple(edges[i].free, edges[i].flow);
+            free_edges[i] = py::make_tuple(edges[i].free, edges[i].flow < eps, edges[i].flow);
         }
-        return py::make_tuple(true, free_edges);
+        return py::make_tuple(true, free_edges, corr_edges);
     }
     else
     {
-        return py::make_tuple(false, py::none());
+        return py::make_tuple(false, py::none(), py::none());
     }
 }
 
@@ -616,7 +634,7 @@ py::tuple Graph::calculate_time()
                     k = t;
                 else
                 {
-                    return py::make_tuple(false, std::vector<int>(), std::vector<double>(), 0);
+                    return py::make_tuple(false, std::vector<int>(), std::vector<double>(), std::vector<double>(), 0);
                 }
             }
         }
@@ -663,7 +681,51 @@ py::tuple Graph::calculate_time()
         costs.push_back(dsu[f.component].potential[f.v] - dsu[f.component].potential[f.u]);
         sum += f.flow * costs[costs.size() - 1];
     }
-    return py::make_tuple(true, braess, costs, sum);
+    std::vector<int> e_add;
+    for (auto &e : edges)
+    {
+        e_add.push_back(e.add_cost);
+    }
+    return py::make_tuple(true, braess, costs, e_add, sum);
+}
+
+std::vector<int> Graph::get_path(int f_id)
+{
+    return get_path_uv(d_flow[f_id].u, d_flow[f_id].v, d_flow[f_id].component);
+}
+
+std::vector<int> Graph::get_path_uv(int u, int v, int corr)
+{
+    int w = corr_trees[corr].lca(u, v);
+    auto r_u = get_path_up_uv(u, w, corr);
+    auto r_v = get_path_up_uv(v, w, corr);
+    r_u.insert(r_u.end(), r_v.rbegin(), r_v.rend());
+    return r_u;
+}
+
+std::vector<int> Graph::get_path_up_uv(int u, int v, int corr)
+{
+    std::vector<int> res_u;
+    while (u != v)
+    {
+        int e = corr_trees[corr].parent_edges[u];
+        int h_u = edges[e].v;
+        if (h_u == u)
+        {
+            h_u = edges[e].u;
+        }
+        if (edges[e].free)
+        {
+            res_u.push_back(e);
+        }
+        else
+        {
+            auto r_edges = get_path_uv(u, h_u, edges[e].def_corr);
+            res_u.insert(res_u.end(), r_edges.begin(), r_edges.end());
+        }
+        u = h_u;
+    }
+    return res_u;
 }
 
 Graph::SumTree::SumTree(const std::vector<std::vector<int>> &neighb,
@@ -820,10 +882,11 @@ PYBIND11_MODULE(graph_flow, m)
              py::arg("edges") = std::vector<std::tuple<int, int, double, double>>())
         .def("add_edge", &Graph::add_edge)
         .def("add_cost", &Graph::add_cost)
-        //.def("block_edge", &Graph::block_edge)
-        //.def("reuse_edge", &Graph::reuse_edge)
+        .def("reset_cost", &Graph::reset_cost)
+        .def("reset_costs", &Graph::reset_costs)
         .def("reset_flow", &Graph::reset_flow)
         .def("set_flow", &Graph::set_flow)
         .def("calculate_flow", &Graph::calculate_flow)
-        .def("calculate_time", &Graph::calculate_time);
+        .def("calculate_time", &Graph::calculate_time)
+        .def("get_path", &Graph::get_path);
 }
