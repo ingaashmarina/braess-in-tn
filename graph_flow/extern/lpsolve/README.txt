@@ -1,5 +1,6 @@
 Introduction
 ------------
+
 What is lp_solve and what is it not?
 The simple answer is, lp_solve is a Mixed Integer Linear Programming (MILP) solver.
 
