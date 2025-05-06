@@ -2,6 +2,7 @@ from typing import List
 from . import graph_flow
 import networkx as nx
 
+
 class Graph(graph_flow.Graph):
     def __init__ (self, n: int, edges: List[tuple], eps: float = 1e-9):
         super().__init__(n, eps, edges)
