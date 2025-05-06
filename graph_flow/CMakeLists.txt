@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.26)
 project(graph_flow LANGUAGES CXX)
 
+
 add_subdirectory(extern/pybind11)
 
 set(LPSOLVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/lpsolve")
