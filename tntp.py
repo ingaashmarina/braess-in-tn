@@ -1,7 +1,6 @@
 from io import TextIOWrapper
 import time
 
-
 def read_metadata(f: TextIOWrapper):
     meta = {}
     while (line := f.readline()).strip() != "<END OF METADATA>":
