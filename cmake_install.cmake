@@ -1,4 +1,4 @@
-# Install script for directory: /home/olegshitikov/Desktop/transport
+
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
